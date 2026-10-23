@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     mls_api_key: str = ""
     mls_api_secret: str = ""
     mls_api_token: str = ""
+    mls_token_url: str = ""
 
     census_api_base: str = "https://api.census.gov/data"
     census_api_key: str = ""

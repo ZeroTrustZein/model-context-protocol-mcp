@@ -3,8 +3,9 @@
 MCP server for real estate **MLS listings** and **demographic data**, with semantic
 property search and natural-language schema filtering.
 
-Status: Stage 2 (types) — scaffold plus the typed domain model: listings, demographics,
-filters and semantic-search shapes in `models.py`. Domain tools land in later stages.
+Status: Stage 3 (core logic) — typed domain model plus the MLS OData client,
+Census ACS client and lexical semantic-search ranking. MCP tools land in later
+stages.
 
 ## Layout
 
@@ -17,6 +18,9 @@ src/mls_mcp/
   __init__.py           package version
   config.py             Settings (pydantic-settings, reads .env / environment)
   models.py             domain types: listings, demographics, filters, search
+  mls.py                RESO OData client: $filter builder, record parsing, paging
+  census.py             Census ACS client: one demographic snapshot per geography
+  search.py             natural-language ranking (idf-weighted term coverage)
   server.py             MCPServer instance + entry point
   __main__.py           python -m mls_mcp
   py.typed              PEP 561 marker
@@ -67,6 +71,7 @@ pytest -q
 | `MLS_API_BASE` | yes | RESO Web API/OData root of the listing feed |
 | `MLS_API_KEY` / `MLS_API_SECRET` | yes¹ | MLS client-credentials auth |
 | `MLS_API_TOKEN` | no | Static bearer token when the provider skips OAuth |
+| `MLS_TOKEN_URL` | with key/secret | OAuth2 client-credentials endpoint for the static-token-free flow |
 | `CENSUS_API_KEY` | no | Raises Census ACS rate limits |
 | `VECTOR_STORE_URL` / `VECTOR_STORE_COLLECTION` | semantic search | Embedding store for property search |
 | `EMBEDDING_MODEL` | no | Embedding model id |
