@@ -3,9 +3,10 @@
 MCP server for real estate **MLS listings** and **demographic data**, with semantic
 property search and natural-language schema filtering.
 
-Status: Stage 4 (subsystems) — typed domain model, MLS OData and Census ACS
-clients, lexical semantic-search ranking, plus the shared TTL response cache and
-stderr logging setup the upstream clients use. MCP tools land in later stages.
+Status: Stage 5 (interface) — the MCP tools that expose the subsystems: listing
+search (OData fetch + lexical relevance ranking) and Census ACS demographics.
+Underneath sit the typed domain model, the MLS/Census clients, and the shared TTL
+response cache with stderr logging.
 
 ## Layout
 
@@ -22,7 +23,7 @@ src/mls_mcp/
   mls.py                RESO OData client: $filter builder, record parsing, paging
   census.py             Census ACS client: one demographic snapshot per geography
   search.py             natural-language ranking (idf-weighted term coverage)
-  server.py             MCPServer instance + entry point
+  server.py             MCPServer instance, tool registrations, entry point
   __main__.py           python -m mls_mcp
   py.typed              PEP 561 marker
 tests/                  pytest suite
@@ -57,6 +58,8 @@ Register with a client (Claude Desktop / OpenCode) as a stdio server launching
 | Tool | Purpose |
 | --- | --- |
 | `server_info` | Server version plus whether MLS, Census and vector-store credentials are configured (no secrets returned) |
+| `search_listings` | Natural-language listing search: schema filters go to the OData query, the query string ranks the results (`query`, `top_k`, `city`, `state`, `postal_code`, price/bed/bath/sqft bounds) |
+| `get_demographics` | Census ACS snapshot for one geography (`geography` such as `zip code:78704`, optional `in_geography`, `year`) |
 
 ## Verify
 
