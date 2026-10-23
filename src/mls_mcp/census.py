@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 
+from mls_mcp.cache import TTLCache, fetch_json
 from mls_mcp.config import Settings, get_settings
 from mls_mcp.models import Demographics
 
@@ -40,6 +41,7 @@ class CensusClient:
         settings: Settings | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         year: int = DEFAULT_YEAR,
+        cache: TTLCache | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._year = year
@@ -48,6 +50,7 @@ class CensusClient:
             timeout=self._settings.http_timeout_seconds,
             transport=transport,
         )
+        self._cache = cache or TTLCache(self._settings.cache_ttl_seconds)
 
     async def __aenter__(self) -> CensusClient:
         return self
@@ -76,9 +79,12 @@ class CensusClient:
             params["key"] = self._settings.census_api_key
 
         resolved_year = year or self._year
-        response = await self._client.get(f"/{resolved_year}/{DEFAULT_DATASET}", params=params)
-        response.raise_for_status()
-        rows = response.json()
+        rows = await fetch_json(
+            self._client,
+            self._cache,
+            f"/{resolved_year}/{DEFAULT_DATASET}",
+            params=params,
+        )
         if len(rows) < 2:
             raise LookupError(f"no ACS data for {for_clause}")
 

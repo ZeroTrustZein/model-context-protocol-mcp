@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import httpx
 
+from mls_mcp.cache import TTLCache, fetch_json
 from mls_mcp.config import Settings, get_settings
 from mls_mcp.models import (
     Address,
@@ -169,6 +170,7 @@ class MLSClient:
         self,
         settings: Settings | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        cache: TTLCache | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._client = httpx.AsyncClient(
@@ -176,6 +178,7 @@ class MLSClient:
             timeout=self._settings.http_timeout_seconds,
             transport=transport,
         )
+        self._cache = cache or TTLCache(self._settings.cache_ttl_seconds)
         self._token = ""
 
     async def __aenter__(self) -> MLSClient:
@@ -211,9 +214,14 @@ class MLSClient:
         return {"Authorization": f"Bearer {self._token}"}
 
     async def _page(self, params: dict[str, object]) -> list[PropertyListing]:
-        response = await self._client.get("", params=params, headers=await self._auth_headers())
-        response.raise_for_status()
-        records = response.json().get("value") or []
+        payload = await fetch_json(
+            self._client,
+            self._cache,
+            "",
+            params=params,
+            headers=await self._auth_headers(),
+        )
+        records = payload.get("value") or []
         return [listing for raw in records if (listing := parse_listing(raw)) is not None]
 
     async def search(

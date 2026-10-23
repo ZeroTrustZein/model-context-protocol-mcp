@@ -3,9 +3,9 @@
 MCP server for real estate **MLS listings** and **demographic data**, with semantic
 property search and natural-language schema filtering.
 
-Status: Stage 3 (core logic) — typed domain model plus the MLS OData client,
-Census ACS client and lexical semantic-search ranking. MCP tools land in later
-stages.
+Status: Stage 4 (subsystems) — typed domain model, MLS OData and Census ACS
+clients, lexical semantic-search ranking, plus the shared TTL response cache and
+stderr logging setup the upstream clients use. MCP tools land in later stages.
 
 ## Layout
 
@@ -17,6 +17,7 @@ requirements-dev.txt    dev deps (includes runtime deps)
 src/mls_mcp/
   __init__.py           package version
   config.py             Settings (pydantic-settings, reads .env / environment)
+  cache.py              TTL cache + cached JSON GET shared by the clients
   models.py             domain types: listings, demographics, filters, search
   mls.py                RESO OData client: $filter builder, record parsing, paging
   census.py             Census ACS client: one demographic snapshot per geography

@@ -3,6 +3,8 @@
 Domain tools are registered by later modules on the shared ``mcp`` instance.
 """
 
+import logging
+
 from mcp.server.mcpserver import MCPServer
 
 from mls_mcp import __version__
@@ -26,8 +28,19 @@ def server_info() -> dict[str, object]:
     }
 
 
+def configure_logging(level: str | None = None) -> None:
+    """Send stderr logs at ``LOG_LEVEL`` so stdio transport stays clean."""
+    logging.basicConfig(
+        level=(level or get_settings().log_level).upper(),
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+    # basicConfig is a no-op once any handler exists (uvicorn, pytest), so pin the level.
+    logging.getLogger().setLevel((level or get_settings().log_level).upper())
+
+
 def main() -> None:
     """Run over stdio (default transport)."""
+    configure_logging()
     mcp.run()
 
 

@@ -1,6 +1,8 @@
+import logging
+
 import mls_mcp
 from mls_mcp.config import Settings
-from mls_mcp.server import SERVER_NAME, mcp, server_info
+from mls_mcp.server import SERVER_NAME, configure_logging, mcp, server_info
 
 
 def test_version_is_exposed() -> None:
@@ -21,3 +23,8 @@ def test_settings_defaults() -> None:
     settings = Settings(_env_file=None)
     assert settings.vector_store_collection == "property_listings"
     assert settings.http_timeout_seconds > 0
+
+
+def test_configure_logging_applies_level() -> None:
+    configure_logging("debug")
+    assert logging.getLogger().level == logging.DEBUG
