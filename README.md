@@ -1,24 +1,23 @@
 # mls-mcp
 
-MCP server for real estate **MLS listings** and **demographic data**, with semantic
-property search and natural-language schema filtering.
+MCP server for real estate **MLS listings** and **demographic data**, with
+natural-language property search and schema filtering.
 
-Status: Stage 5 (interface) — the MCP tools that expose the subsystems: listing
-search (OData fetch + lexical relevance ranking) and Census ACS demographics.
-Underneath sit the typed domain model, the MLS/Census clients, and the shared TTL
-response cache with stderr logging.
+Status: complete (`0.1.0`). Three tools over stdio: listing search (RESO/OData
+fetch + lexical relevance ranking) and Census ACS demographics, on top of a typed
+domain model, two async HTTP clients, and a shared TTL response cache.
 
 ## Layout
 
 ```
 pyproject.toml          package manifest + ruff/pytest config
 requirements.txt        runtime deps
-requirements-dev.txt    dev deps (includes runtime deps)
+requirements-dev.txt    dev deps (-r requirements.txt + pytest, ruff)
 .env.example            environment contract (copy to .env)
 src/mls_mcp/
-  __init__.py           package version
+  __init__.py           package version (from installed metadata)
   config.py             Settings (pydantic-settings, reads .env / environment)
-  cache.py              TTL cache + cached JSON GET shared by the clients
+  cache.py              TTLCache + fetch_json, shared by both clients
   models.py             domain types: listings, demographics, filters, search
   mls.py                RESO OData client: $filter builder, record parsing, paging
   census.py             Census ACS client: one demographic snapshot per geography
@@ -26,7 +25,8 @@ src/mls_mcp/
   server.py             MCPServer instance, tool registrations, entry point
   __main__.py           python -m mls_mcp
   py.typed              PEP 561 marker
-tests/                  pytest suite
+tests/                  pytest suite (offline, stubbed transports)
+.github/workflows/ci.yml  lint + test on Python 3.10-3.14
 ```
 
 ## Setup
@@ -57,9 +57,34 @@ Register with a client (Claude Desktop / OpenCode) as a stdio server launching
 
 | Tool | Purpose |
 | --- | --- |
-| `server_info` | Server version plus whether MLS, Census and vector-store credentials are configured (no secrets returned) |
-| `search_listings` | Natural-language listing search: schema filters go to the OData query, the query string ranks the results (`query`, `top_k`, `city`, `state`, `postal_code`, price/bed/bath/sqft bounds) |
-| `get_demographics` | Census ACS snapshot for one geography (`geography` such as `zip code:78704`, optional `in_geography`, `year`) |
+| `server_info` | Server name/version plus whether MLS, Census and vector-store credentials are configured (no secrets returned) |
+| `search_listings` | Natural-language listing search. `query` ranks results; the optional filters go to OData. Params: `query`, `top_k` (default 10), `city`, `state`, `postal_code`, `min_price`, `max_price`, `min_bedrooms`, `min_bathrooms`, `min_sqft`, `max_sqft` |
+| `get_demographics` | Census ACS snapshot for one geography. Params: `geography` (`zip code:78704`, `county:453`, `state:48`), optional `in_geography` (`state:48`), `year` (default 2023) |
+
+`search_listings` returns `{query, matches[], total_considered}`; each match is
+`{listing, score, highlights}`. Scores are relative within one response, not
+comparable across queries.
+
+`get_demographics` returns population, households, median household income, median
+age and median home value. ACS missing-value sentinels (negative numbers) become
+`null`. The payload also carries `unemployment_rate` and `poverty_rate`, currently
+always `null` (no ACS variable is mapped yet).
+
+## How it works
+
+1. `search_listings` builds an OData `$filter` from the structured filters, fetches
+   the newest listings (`$orderby ModificationTimestamp desc`, paged 100 at a time,
+   pool of `max(top_k * 5, 50)`), then re-checks the filters client-side.
+2. `search.py` scores each candidate by idf-weighted coverage of the query terms
+   over description, features, street/city/state and property type; a listing with
+   no matching term is dropped. Ranking is lexical by design — no embedding backend
+   is needed. The `SearchResults`/`PropertyMatch` shape leaves room for a vector
+   store to supply `score`/`highlights` later.
+3. `cache.py` memoizes GET responses for `CACHE_TTL_SECONDS`, keyed by path+params.
+   Both clients accept an injected `httpx` transport and cache, which is how the
+   tests run offline.
+
+Logs go to stderr (`LOG_LEVEL`) so the stdio transport stays clean.
 
 ## Verify
 
@@ -68,19 +93,33 @@ ruff check . && ruff format --check .
 pytest -q
 ```
 
+CI runs the same two steps on Python 3.10-3.14.
+
 ## Environment
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `MLS_API_BASE` | yes | RESO Web API/OData root of the listing feed |
-| `MLS_API_KEY` / `MLS_API_SECRET` | yes¹ | MLS client-credentials auth |
-| `MLS_API_TOKEN` | no | Static bearer token when the provider skips OAuth |
-| `MLS_TOKEN_URL` | with key/secret | OAuth2 client-credentials endpoint for the static-token-free flow |
+| `MLS_API_KEY` / `MLS_API_SECRET` / `MLS_TOKEN_URL` | yes¹ | OAuth2 client-credentials flow |
+| `MLS_API_TOKEN` | yes¹ | Static bearer token, for providers without OAuth |
+| `CENSUS_API_BASE` | no | Defaults to `https://api.census.gov/data` |
 | `CENSUS_API_KEY` | no | Raises Census ACS rate limits |
-| `VECTOR_STORE_URL` / `VECTOR_STORE_COLLECTION` | semantic search | Embedding store for property search |
-| `EMBEDDING_MODEL` | no | Embedding model id |
-| `LOG_LEVEL`, `HTTP_TIMEOUT_SECONDS`, `CACHE_TTL_SECONDS` | no | Runtime tuning |
+| `VECTOR_STORE_URL` / `VECTOR_STORE_COLLECTION` | no | Reserved for the embedding backend; reported by `server_info` only |
+| `EMBEDDING_MODEL` | no | Reserved, same as above |
+| `LOG_LEVEL`, `HTTP_TIMEOUT_SECONDS`, `CACHE_TTL_SECONDS` | no | Runtime tuning (defaults `INFO`, `30`, `300`) |
 
-¹ or `MLS_API_TOKEN` instead.
+¹ one of the two credential sets must be configured, or `search_listings` raises
+`RuntimeError: MLS credentials missing`.
 
 Never commit `.env`; it is gitignored.
+
+## Troubleshooting
+
+- `RuntimeError: MLS credentials missing` — set `MLS_API_TOKEN`, or all three of
+  `MLS_API_KEY`, `MLS_API_SECRET`, `MLS_TOKEN_URL`.
+- `LookupError: no ACS data for ...` — the geography/year has no ACS rows; check the
+  `for` clause spelling (`zip code:78704`, not `ZIP 78704`).
+- Empty matches with a non-empty pool — no listing shared a query term; the ranking
+  is literal word matching, so drop filler words from `query` and lean on filters.
+- Client disconnects at startup — a log handler writing to stdout, or `anyio` too
+  old; see Setup.
