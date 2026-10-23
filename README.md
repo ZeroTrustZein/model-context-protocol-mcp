@@ -3,8 +3,8 @@
 MCP server for real estate **MLS listings** and **demographic data**, with semantic
 property search and natural-language schema filtering.
 
-Status: Stage 1 (scaffold) — package layout, manifests, lint/format/test configuration,
-environment contract and a runnable MCP entry point. Domain tools land in later stages.
+Status: Stage 2 (types) — scaffold plus the typed domain model: listings, demographics,
+filters and semantic-search shapes in `models.py`. Domain tools land in later stages.
 
 ## Layout
 
@@ -16,6 +16,7 @@ requirements-dev.txt    dev deps (includes runtime deps)
 src/mls_mcp/
   __init__.py           package version
   config.py             Settings (pydantic-settings, reads .env / environment)
+  models.py             domain types: listings, demographics, filters, search
   server.py             MCPServer instance + entry point
   __main__.py           python -m mls_mcp
   py.typed              PEP 561 marker
