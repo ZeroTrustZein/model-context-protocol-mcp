@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mls-mcp"
 version = "0.1.0"
-description = "MCP server exposing real estate MLS listings and demographic data with semantic property search and natural-language schema filtering"
+description = "MCP server exposing real estate MLS listings and demographic data with natural-language property search and schema filtering"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

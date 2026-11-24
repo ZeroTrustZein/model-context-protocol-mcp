@@ -1,7 +1,7 @@
 """Ranking for natural-language property search.
 
-Scoring is lexical (idf-weighted query-term coverage) so semantic search works
-without an embedding backend; a vector store can supply ``score``/``highlights``
+Scoring is lexical (idf-weighted query-term coverage) so natural-language search
+works without an embedding backend; a vector store can supply ``score``/``highlights``
 through the same :class:`SearchResults` shape later.
 """
 
@@ -52,30 +52,24 @@ def search_listings(
         return SearchResults(query=query.query, matches=[], total_considered=len(candidates))
 
     documents = [Counter(tokenize(_document(listing))) for listing in candidates]
-    document_frequency = Counter(term for document in documents for term in document.keys())
+    document_frequency = Counter(term for document in documents for term in document)
     weights = {
         term: math.log(1 + len(documents) / document_frequency[term])
         for term in terms
         if term in document_frequency
     }
-    total_weight = sum(weights.values())
-    if total_weight <= 0:
+    if not weights:
         return SearchResults(query=query.query, matches=[], total_considered=len(candidates))
+    total_weight = sum(weights.values())
 
-    matches = [
-        PropertyMatch(
-            listing=listing,
-            score=score,
-            highlights=sorted(term for term in weights if term in document),
-        )
-        for listing, document in zip(candidates, documents, strict=True)
-        if (
-            score := sum(weight for term, weight in weights.items() if term in document)
-            / total_weight
-        )
-        >= query.min_score
-        and score > 0
-    ]
+    matches: list[PropertyMatch] = []
+    for listing, document in zip(candidates, documents, strict=True):
+        hits = {term: weight for term, weight in weights.items() if term in document}
+        score = sum(hits.values()) / total_weight
+        if score > 0 and score >= query.min_score:
+            matches.append(
+                PropertyMatch(listing=listing, score=score, highlights=sorted(hits))
+            )
     matches.sort(key=lambda match: match.score, reverse=True)
     return SearchResults(
         query=query.query,
