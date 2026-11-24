@@ -1,5 +1,7 @@
 """Tool-level tests: registration plus the stub-backed search/demographics tools."""
 
+import logging
+
 import httpx
 import pytest
 from mcp.server.mcpserver import MCPServer
@@ -110,3 +112,87 @@ def test_rank_alias_matches_search_module() -> None:
 def test_server_instance() -> None:
     assert isinstance(server.mcp, MCPServer)
     assert server.mcp.name == server.SERVER_NAME
+
+
+def test_server_info_flags_follow_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        server,
+        "get_settings",
+        lambda: Settings(
+            _env_file=None,
+            mls_api_key="k",
+            census_api_key="k",
+            vector_store_url="https://vector.test",
+        ),
+    )
+    info = server.server_info()
+    assert info["mls_configured"] is True
+    assert info["census_configured"] is True
+    assert info["vector_store_configured"] is True
+
+    monkeypatch.setattr(server, "get_settings", lambda: Settings(_env_file=None))
+    info = server.server_info()
+    assert info["mls_configured"] is False
+    assert info["census_configured"] is False
+    assert info["vector_store_configured"] is False
+
+
+class _RecordingMLS:
+    def __init__(self) -> None:
+        self.limits: list[int] = []
+
+    async def __aenter__(self) -> "_RecordingMLS":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+    async def search(self, filters: object, *, limit: int) -> list[object]:
+        self.limits.append(limit)
+        return []
+
+
+@pytest.mark.parametrize(("top_k", "pool"), [(3, 50), (20, 100)])
+async def test_search_listings_widens_candidate_pool(
+    monkeypatch: pytest.MonkeyPatch, top_k: int, pool: int
+) -> None:
+    client = _RecordingMLS()
+    monkeypatch.setattr(server, "MLSClient", lambda: client)
+    await server.search_listings("park", top_k=top_k)
+    assert client.limits == [pool]
+
+
+async def test_get_demographics_forwards_optional_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=ACS_ROWS)
+
+    monkeypatch.setattr(
+        server,
+        "CensusClient",
+        lambda: CensusClient(_settings(), transport=httpx.MockTransport(handler)),
+    )
+    result = await server.get_demographics("county:453", in_geography="state:48", year=2022)
+    assert result["as_of_year"] == 2022
+    assert seen[0].url.path.endswith("/2022/acs/acs5")
+    assert seen[0].url.params["in"] == "state:48"
+
+
+def test_configure_logging_uses_settings_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        server, "get_settings", lambda: Settings(_env_file=None, log_level="warning")
+    )
+    server.configure_logging()
+    assert logging.getLogger().level == logging.WARNING
+
+
+def test_main_runs_stdio_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(server, "configure_logging", lambda: calls.append("log"))
+    monkeypatch.setattr(server.mcp, "run", lambda: calls.append("run"))
+    server.main()
+    assert calls == ["log", "run"]

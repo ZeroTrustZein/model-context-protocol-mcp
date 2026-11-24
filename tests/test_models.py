@@ -112,3 +112,40 @@ def test_demographics_requires_year() -> None:
 
 def test_address_defaults() -> None:
     assert Address().street == ""
+
+
+@pytest.mark.parametrize(
+    ("filters", "expected"),
+    [
+        ({"state": "TX"}, True),
+        ({"state": "CA"}, False),
+        ({"postal_code": "78704"}, True),
+        ({"postal_code": "00000"}, False),
+        ({"statuses": [ListingStatus.ACTIVE]}, True),
+        ({"statuses": [ListingStatus.SOLD]}, False),
+        ({"property_types": [PropertyType.RESIDENTIAL]}, True),
+        ({"property_types": [PropertyType.CONDO]}, False),
+        ({"min_bedrooms": 3}, True),
+        ({"min_bedrooms": 4}, False),
+        ({"min_bathrooms": 2.5}, True),
+        ({"min_bathrooms": 3}, False),
+        ({"max_sqft": 1800}, True),
+        ({"max_sqft": 1700}, False),
+    ],
+)
+def test_filter_matches_remaining_constraints(filters: dict[str, object], expected: bool) -> None:
+    assert PropertyFilter(**filters).matches(_listing()) is expected
+
+
+def test_filter_rejects_inverted_sqft_range() -> None:
+    with pytest.raises(ValidationError):
+        PropertyFilter(min_sqft=2000, max_sqft=1000)
+
+
+def test_semantic_query_validates_bounds() -> None:
+    with pytest.raises(ValidationError):
+        SemanticSearchQuery(query="")
+    with pytest.raises(ValidationError):
+        SemanticSearchQuery(query="park", top_k=0)
+    with pytest.raises(ValidationError):
+        SemanticSearchQuery(query="park", min_score=1.5)

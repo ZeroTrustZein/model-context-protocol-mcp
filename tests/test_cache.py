@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from mls_mcp.cache import TTLCache, fetch_json
 from mls_mcp.config import Settings
@@ -86,5 +87,31 @@ async def test_client_cache_can_be_disabled() -> None:
     ) as client:
         await client.demographics("zip code:78704")
         await client.demographics("zip code:78704")
+
+    assert len(calls) == 2
+
+
+def test_cache_clear() -> None:
+    cache = TTLCache(ttl_seconds=60)
+    cache.set("k", 1)
+    cache.clear()
+    assert len(cache) == 0
+    assert cache.get("k") is None
+
+
+async def test_fetch_json_raises_and_does_not_cache_errors() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(500, json={"error": "boom"})
+
+    cache = TTLCache(ttl_seconds=60)
+    async with httpx.AsyncClient(
+        base_url="https://upstream.test", transport=httpx.MockTransport(handler)
+    ) as client:
+        for _ in range(2):
+            with pytest.raises(httpx.HTTPStatusError):
+                await fetch_json(client, cache, "/odata")
 
     assert len(calls) == 2

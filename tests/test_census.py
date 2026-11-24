@@ -53,3 +53,39 @@ async def test_demographics_raises_without_rows() -> None:
     ) as client:
         with pytest.raises(LookupError):
             await client.demographics("zip code:99999")
+
+
+async def test_demographics_sends_in_key_and_dataset_path() -> None:
+    seen: list[httpx.Request] = []
+    rows = [
+        ["NAME", "B01003_001E", "B11001_001E", "B19013_001E", "B01002_001E", "B25077_001E"],
+        ["County 453", "100", "50", "70000", "35", "400000"],
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=rows)
+
+    settings = Settings(_env_file=None, census_api_key="key", census_api_base="https://census.test")
+    async with CensusClient(settings, transport=httpx.MockTransport(handler)) as client:
+        await client.demographics("county:453", in_clause="state:48")
+
+    request = seen[0]
+    assert request.url.path == "/2023/acs/acs5"
+    assert request.url.params["for"] == "county:453"
+    assert request.url.params["in"] == "state:48"
+    assert request.url.params["key"] == "key"
+
+
+async def test_demographics_falls_back_name_and_nulls_nonnumeric() -> None:
+    rows = [
+        ["NAME", "B01003_001E", "B11001_001E", "B19013_001E", "B01002_001E", "B25077_001E"],
+        [None, "N", "50", "70000", "35", "400000"],
+    ]
+    async with CensusClient(
+        Settings(_env_file=None), transport=httpx.MockTransport(_handler(rows))
+    ) as client:
+        snapshot = await client.demographics("zip code:00000")
+
+    assert snapshot.name == "zip code:00000"
+    assert snapshot.population is None

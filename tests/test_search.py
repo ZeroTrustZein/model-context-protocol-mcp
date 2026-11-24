@@ -54,3 +54,22 @@ def test_unmatched_query_returns_nothing() -> None:
     results = search_listings(CORPUS, SemanticSearchQuery(query="zeppelin hangar"))
     assert results.matches == []
     assert results.total_considered == len(CORPUS)
+
+
+def test_empty_query_terms_return_nothing() -> None:
+    results = search_listings(CORPUS, SemanticSearchQuery(query="!!! ???"))
+    assert results.matches == []
+    assert results.total_considered == len(CORPUS)
+
+
+def test_empty_candidate_pool() -> None:
+    results = search_listings([], SemanticSearchQuery(query="park"))
+    assert results.matches == []
+    assert results.total_considered == 0
+
+
+def test_filters_can_exclude_everything() -> None:
+    query = SemanticSearchQuery(query="park", filters=PropertyFilter(min_price=10_000_000))
+    results = search_listings(CORPUS, query)
+    assert results.matches == []
+    assert results.total_considered == 0

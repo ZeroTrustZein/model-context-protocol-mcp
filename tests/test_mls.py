@@ -144,3 +144,98 @@ async def test_client_credentials_flow() -> None:
     listing_calls = [request for request in seen if request.url.path == "/odata"]
     assert len(token_calls) == 1
     assert all(request.headers["Authorization"] == "Bearer fresh" for request in listing_calls)
+
+
+def test_build_filter_postal_bathrooms_max_sqft() -> None:
+    expression = build_filter(PropertyFilter(postal_code="78704", min_bathrooms=2, max_sqft=2000))
+    assert expression == (
+        "PostalCode eq '78704' and BathroomsTotalDecimal ge 2.0 and LivingArea le 2000.0"
+    )
+
+
+def test_parse_listing_falls_back_to_other_ids() -> None:
+    for key in ("ListingKey", "MLSNumber"):
+        listing = parse_listing({key: "K-1", "ListPrice": 100})
+        assert listing is not None
+        assert listing.listing_id == "K-1"
+        assert listing.mls_number is None
+
+
+def test_parse_listing_normalises_enums() -> None:
+    listing = parse_listing(
+        {**RESO_RECORD, "StandardStatus": " Closed ", "PropertyType": "Multi Family"}
+    )
+    assert listing is not None
+    assert listing.status is ListingStatus.SOLD
+    assert listing.property_type is PropertyType.MULTI_FAMILY
+
+
+def test_parse_listing_defaults_unknown_enums() -> None:
+    listing = parse_listing({**RESO_RECORD, "StandardStatus": "Bogus", "PropertyType": 7})
+    assert listing is not None
+    assert listing.status is ListingStatus.ACTIVE
+    assert listing.property_type is PropertyType.RESIDENTIAL
+
+
+def test_parse_listing_rejects_invalid_values() -> None:
+    assert parse_listing({**RESO_RECORD, "ListPrice": True}) is None
+    assert parse_listing({**RESO_RECORD, "YearBuilt": 1500}) is None
+    assert parse_listing({**RESO_RECORD, "Latitude": 999}) is None
+
+
+def test_parse_listing_location_needs_both_coordinates() -> None:
+    listing = parse_listing({**RESO_RECORD, "Longitude": None})
+    assert listing is not None
+    assert listing.location is None
+
+
+def test_parse_listing_merges_feature_lists() -> None:
+    listing = parse_listing(
+        {**RESO_RECORD, "InteriorFeatures": ["Pool", " ", "Gym"], "ExteriorFeatures": "Patio, "}
+    )
+    assert listing is not None
+    assert listing.features == ["Pool", "Gym", "Patio"]
+
+
+async def test_search_pages_until_limit() -> None:
+    seen: list[tuple[int, int]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        top = int(request.url.params["$top"])
+        skip = int(request.url.params["$skip"])
+        seen.append((skip, top))
+        records = [{**RESO_RECORD, "ListingId": f"MLS-{skip + i}"} for i in range(top)]
+        return httpx.Response(200, json={"value": records})
+
+    async with MLSClient(_settings(), transport=httpx.MockTransport(handler)) as client:
+        listings = await client.search(limit=5, page_size=2)
+
+    assert seen == [(0, 2), (2, 2), (4, 1)]
+    assert [listing.listing_id for listing in listings] == [f"MLS-{i}" for i in range(5)]
+
+
+async def test_search_zero_limit_skips_http() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"value": []})
+
+    async with MLSClient(_settings(), transport=httpx.MockTransport(handler)) as client:
+        assert await client.search(limit=0) == []
+    assert calls == []
+
+
+async def test_token_endpoint_failure_propagates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "invalid_client"})
+
+    settings = Settings(
+        _env_file=None,
+        mls_api_key="key",
+        mls_api_secret="secret",
+        mls_token_url="https://mls.example/token",
+    )
+    async with MLSClient(settings, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.search()

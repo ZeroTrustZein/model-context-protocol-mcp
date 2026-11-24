@@ -1,7 +1,9 @@
 import logging
 
+import pytest
+
 import mls_mcp
-from mls_mcp.config import Settings
+from mls_mcp.config import Settings, get_settings
 from mls_mcp.server import SERVER_NAME, configure_logging, mcp, server_info
 
 
@@ -28,3 +30,12 @@ def test_settings_defaults() -> None:
 def test_configure_logging_applies_level() -> None:
     configure_logging("debug")
     assert logging.getLogger().level == logging.DEBUG
+
+
+def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CACHE_TTL_SECONDS", "42")
+    assert Settings(_env_file=None).cache_ttl_seconds == 42
+
+
+def test_get_settings_is_cached() -> None:
+    assert get_settings() is get_settings()
